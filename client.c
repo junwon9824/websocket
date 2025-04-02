@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,86 +76,79 @@ printf("mask_key: %02x %02x %02x %02x\n", mask_key[0], mask_key[1], mask_key[2],
     }
 }
 
-
-
-/* void receive_messages(int sock) {
-    printf("receive messageeee\n");
-	char buffer[BUFFER_SIZE];
-        int bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
-        if (bytes_received <= 0) {
-            // 수신 오류 또는 연결 종료
-       		printf("receive error\n");
-	   }
-        buffer[bytes_received] = '\0';
-        printf("Received from server: %s\n", buffer);
-}
-*/
+ 
 
 
 
 void receive_messages(int sock, const char *key) {
     char buffer[BUFFER_SIZE];
-    int bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
-    if (bytes_received <= 0) {
-        // 수신 오류 또는 연결 종료
-        printf("Receive error\n");
-        return;
-    }
-    buffer[bytes_received] = '\0';
+    struct timeval timeout;
 
-    // 응답 코드 확인
-    if (strncmp(buffer, "HTTP/1.1 101 Switching Protocols", 30) == 0) {
-        // Sec-WebSocket-Accept 검증
-        char accept_key[BUFFER_SIZE];
-        if (sscanf(buffer, "HTTP/1.1 101 Switching Protocols\r\n"
-                           "Upgrade: websocket\r\n"
-                           "Connection: Upgrade\r\n"
-                           "Sec-WebSocket-Accept: %s\r\n", accept_key) != 1) {
-            fprintf(stderr, "Sec-WebSocket-Accept header missing or malformed.\n");
+
+
+
+        int bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
+        if (bytes_received <= 0) {
+            printf("Server disconnected or error occurred\n");
             close(sock);
             exit(EXIT_FAILURE);
         }
+        buffer[bytes_received] = '\0';
 
-        // 클라이언트가 생성한 Sec-WebSocket-Key를 기반으로 Sec-WebSocket-Accept 값을 생성
-        char expected_accept_key[BUFFER_SIZE];
-        char combined_key[BUFFER_SIZE];
-        snprintf(combined_key, sizeof(combined_key), "%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", key);
+        // 응답 코드 확인
+        if (strncmp(buffer, "HTTP/1.1 101 Switching Protocols", 30) == 0) {
+            // Sec-WebSocket-Accept 검증
+            char accept_key[BUFFER_SIZE];
+            if (sscanf(buffer, "HTTP/1.1 101 Switching Protocols\r\n"
+                               "Upgrade: websocket\r\n"
+                               "Connection: Upgrade\r\n"
+                               "Sec-WebSocket-Accept: %s\r\n", accept_key) != 1) {
+                fprintf(stderr, "Sec-WebSocket-Accept header missing or malformed.\n");
+                close(sock);
+                exit(EXIT_FAILURE);
+            }
 
-        // SHA1 해시 생성
-        unsigned char hash[SHA_DIGEST_LENGTH];
-        SHA1((unsigned char *)combined_key, strlen(combined_key), hash);
+            // 클라이언트가 생성한 Sec-WebSocket-Key를 기반으로 Sec-WebSocket-Accept 값을 생성
+            char expected_accept_key[BUFFER_SIZE];
+            char combined_key[BUFFER_SIZE];
+            snprintf(combined_key, sizeof(combined_key), "%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", key);
 
-        // Base64 인코딩
-        BIO *bio, *b64;
-        BUF_MEM *bufferPtr;
+            // SHA1 해시 생성
+            unsigned char hash[SHA_DIGEST_LENGTH];
+            SHA1((unsigned char *)combined_key, strlen(combined_key), hash);
 
-        b64 = BIO_new(BIO_f_base64());
-        bio = BIO_new(BIO_s_mem());
-        bio = BIO_push(b64, bio);
-        BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
-        BIO_write(bio, hash, SHA_DIGEST_LENGTH);
-        BIO_flush(bio);
-        BIO_get_mem_ptr(bio, &bufferPtr);
-        BIO_set_close(bio, BIO_NOCLOSE);
-        BIO_free_all(bio);
+            // Base64 인코딩
+            BIO *bio, *b64;
+            BUF_MEM *bufferPtr;
 
-        // Base64 인코딩된 문자열을 accept_key와 비교
-        char *base64_encoded = malloc(bufferPtr->length + 1);
-        memcpy(base64_encoded, bufferPtr->data, bufferPtr->length);
-        base64_encoded[bufferPtr->length] = '\0';
+            b64 = BIO_new(BIO_f_base64());
+            bio = BIO_new(BIO_s_mem());
+            bio = BIO_push(b64, bio);
+            BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
+            BIO_write(bio, hash, SHA_DIGEST_LENGTH);
+            BIO_flush(bio);
+            BIO_get_mem_ptr(bio, &bufferPtr);
+            BIO_set_close(bio, BIO_NOCLOSE);
+            BIO_free_all(bio);
 
-        if (strcmp(accept_key, base64_encoded) != 0) {
-            fprintf(stderr, "Sec-WebSocket-Accept value mismatch.\n");
+            // Base64 인코딩된 문자열을 accept_key와 비교
+            char *base64_encoded = malloc(bufferPtr->length + 1);
+            memcpy(base64_encoded, bufferPtr->data, bufferPtr->length);
+            base64_encoded[bufferPtr->length] = '\0';
+
+            if (strcmp(accept_key, base64_encoded) != 0) {
+                fprintf(stderr, "Sec-WebSocket-Accept value mismatch.\n");
+                free(base64_encoded);
+                close(sock);
+                exit(EXIT_FAILURE);
+            }
+
             free(base64_encoded);
-            close(sock);
-            exit(EXIT_FAILURE);
+            printf("Handshake successful!\n");
+        } else {
+            printf("Received from server: %s\n", buffer);
         }
-
-        free(base64_encoded);
-        printf("Handshake successful!\n");
-    } else {
-        printf("Received from server: %s\n", buffer);
-    }
+    // }
 }
 
 
@@ -180,7 +174,7 @@ int main() {
     inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
 
     // 서버에 연결
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)	{
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Connection failed");
         close(sock);
         exit(EXIT_FAILURE);
@@ -198,32 +192,58 @@ int main() {
              "Sec-WebSocket-Version: 13\r\n\r\n",
              SERVER_IP, SERVER_PORT, key);
 
-    // 핸드셰이크 요청 전송
+       // 핸드셰이크 요청 전송
     send(sock, request, strlen(request), 0);
 
     // 서버로부터 응답 수신
-    receive_messages(sock, key );
-
-
-
+    receive_messages(sock, key);
 
     // 메시지를 계속해서 전송
     char message[BUFFER_SIZE];
-    while (1) {
-        printf("Send a message (or type 'exit' to quit): ");
-        fgets(message, sizeof(message), stdin);
-        message[strcspn(message, "\n")] = 0; // 개행 문자 제거
+    fd_set readfds;
+    int maxfd = sock > fileno(stdin) ? sock : fileno(stdin);
+    struct timeval timeout;
 
-        // "exit" 입력 시 종료
-        if (strncmp(message, "exit", 4) == 0) {
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(sock, &readfds);
+        FD_SET(fileno(stdin), &readfds);
+
+        timeout.tv_sec = 60;
+        timeout.tv_usec = 0;
+
+        int activity = select(maxfd + 1, &readfds, NULL, NULL, &timeout);
+
+        if (activity < 0) {
+            perror("Select error");
             break;
+        } else if (activity == 0) {
+            printf("Timeout occurred\n");
+           	
+			close(sock);
+
         }
 
-        // 메시지 전송
-        send_message(sock, message);
-		receive_messages(sock , key);
+        // 서버로부터 메시지 수신
+        if (FD_ISSET(sock, &readfds)) {
+            receive_messages(sock, key);
+        }
 
-   }
+        // 표준 입력으로부터 입력 감지
+        if (FD_ISSET(fileno(stdin), &readfds)) {
+            // printf("Send a message (or type 'exit' to quit): ");
+            fgets(message, sizeof(message), stdin);
+            message[strcspn(message, "\n")] = 0; // 개행 문자 제거
+
+            // "exit" 입력 시 종료
+            if (strncmp(message, "exit", 4) == 0) {
+                break;
+            }
+
+            // 메시지 전송
+            send_message(sock, message);
+        }
+    }
 
     close(sock);
     return 0;
